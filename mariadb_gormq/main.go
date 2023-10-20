@@ -7,7 +7,7 @@ import (
 	"time"
 
 	svsignaldb "github.com/lasaleks/db-benchmark/svsignal_db"
-	"gorm.io/driver/sqlite"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -15,7 +15,7 @@ import (
 func FillSignals(db *gorm.DB) {
 	gr := &svsignaldb.Group{Model: gorm.Model{ID: 1}, Name: "Группа"}
 	db.Create(&gr)
-	for i := 0; i < SIGNALS_NOF; i++ {
+	for i := 1; i <= SIGNALS_NOF; i++ {
 		db.Create(&svsignaldb.Signal{Model: gorm.Model{ID: uint(i)}, GroupID: gr.ID, Name: fmt.Sprintf("Signal%d", i), Key: fmt.Sprintf("Signal.%d", i), Period: 60})
 	}
 }
@@ -40,11 +40,11 @@ func timer(name string) func() {
 var new_logger = logger.New(
 	log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer
 	logger.Config{
-		SlowThreshold:             time.Second,   // Slow SQL threshold
-		LogLevel:                  logger.Silent, // Log level
-		IgnoreRecordNotFoundError: true,          // Ignore ErrRecordNotFound error for logger
-		ParameterizedQueries:      true,          // Don't include params in the SQL log
-		Colorful:                  false,         // Disable color
+		SlowThreshold:             time.Second * 10, // Slow SQL threshold
+		LogLevel:                  logger.Silent,    // Log level
+		IgnoreRecordNotFoundError: true,             // Ignore ErrRecordNotFound error for logger
+		ParameterizedQueries:      true,             // Don't include params in the SQL log
+		Colorful:                  false,            // Disable color
 	},
 )
 
@@ -78,7 +78,7 @@ func test1(db *gorm.DB, name_db string) {
 	}
 }
 
-func test2(db *gorm.DB, name_db string) {
+func test2(db *gorm.DB) {
 	rows_record = 0
 	// Migrate the schema
 	svsignaldb.Migrate(db)
@@ -93,7 +93,7 @@ func test2(db *gorm.DB, name_db string) {
 		value_id = fval.ID
 	}
 	fmt.Println("------test2---- bulk insert + transaction")
-	defer timer(name_db)()
+	defer timer("")()
 	pack_size := BULK_INSERT_SIZE
 	values := make([]svsignaldb.FValue, pack_size)
 	for j := 0; j < CYCLE; j++ {
@@ -110,46 +110,19 @@ func test2(db *gorm.DB, name_db string) {
 	}
 }
 
-func open_db(name_db string) *gorm.DB {
-	db, err := gorm.Open(sqlite.Open(name_db), &config)
+func open_db() *gorm.DB {
+	dsn := "apache2:apache2data@tcp(localhost:3306)/benchmark?charset=utf8&parseTime=True&loc=Local"
+	db, err := gorm.Open(mysql.Open(dsn), &config)
+
+	//db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
 	if err != nil {
 		panic("failed to connect database")
 	}
-	for _, exec := range EXECS {
-		db.Exec(exec)
-	}
+	/*
+		for _, exec := range EXECS {
+			db.Exec(exec)
+		}*/
 	return db
-}
-
-func test3(db *gorm.DB, name_db string) {
-	rows_record = 0
-	// Migrate the schema
-	svsignaldb.Migrate(db)
-	FillSignals(db)
-	value_id := 0
-	fval := svsignaldb.FValue{}
-	res := db.Last(&fval)
-	///res := db.Last(&svsignaldb.FValue{}, &value_id)
-	if res.Error != nil {
-		log.Printf("GetLastId", res.Error.Error())
-	} else {
-		value_id = fval.ID
-	}
-	fmt.Println("------" + name_db + "---- transaction")
-	defer timer(name_db)()
-	pack_size := BULK_INSERT_SIZE
-	for j := 0; j < CYCLE; j++ {
-		for signal_id := 1; signal_id <= SIGNALS_NOF; signal_id++ {
-			tx := db.Begin()
-			for i := 0; i < pack_size; i++ {
-				value_id++
-				rows_record++
-				tx.Create(&svsignaldb.FValue{ID: value_id, SignalID: uint(signal_id), UTime: int64(signal_id), Value: float64(signal_id)})
-			}
-
-			tx.Commit()
-		}
-	}
 }
 
 const BULK_INSERT_SIZE = 1000
@@ -172,6 +145,6 @@ func main() {
 	fmt.Printf("%#v\n", EXECS)
 	fmt.Printf("%+v\n", config)
 	//test1(open_db("test_bulk.db"), "test_bulk.db")
-	test2(open_db("test_bulk_transaction.db"), "test_bulk_transaction.db")
+	test2(open_db())
 	//test3(open_db("test_transaction.db"), "test_transaction.db")
 }
