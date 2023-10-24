@@ -1,0 +1,18 @@
+{
+    // Используйте IntelliSense, чтобы узнать о возможных атрибутах.
+    // Наведите указатель мыши, чтобы просмотреть описания существующих атрибутов.
+    // Для получения дополнительной информации посетите: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Package",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${fileDirname}",
+            //"args": ["--signal-nof", "2000", "--bulk-size", "1000", "--write", "--print-process"]
+            "args": ["--signal-nof", "50", "--bulk-size", "1000", "--write", "--print-process", "--type-db", "mysql", "--url" ,"apache2:apache2data@tcp(localhost:3306)/benchmark?charset=utf8&parseTime=True&loc=Local", "--signal-write-nof-rows", "10"]
+            //--signal-nof 50 --bulk-size 1000 --write --print-process --read-begin 332 --read-end 2000 --limit 100 --migrate --type-db mysql --url "apache2:apache2data@tcp(localhost:3306)/benchmark?charset=utf8&parseTime=True&loc=Local"
+        }
+    ]
+}

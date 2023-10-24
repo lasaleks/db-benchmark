@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	gormqbmbase "github.com/lasaleks/db-benchmark/gormq_bm_base"
 	svsignaldb "github.com/lasaleks/db-benchmark/svsignal_db"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -48,7 +49,7 @@ var new_logger = logger.New(
 	},
 )
 
-func test1(db *gorm.DB, name_db string) {
+func testWrite1(db *gorm.DB, name_db string) {
 	rows_record = 0
 	// Migrate the schema
 	svsignaldb.Migrate(db)
@@ -78,7 +79,7 @@ func test1(db *gorm.DB, name_db string) {
 	}
 }
 
-func test2(db *gorm.DB) {
+func testWrite2(db *gorm.DB) {
 	rows_record = 0
 	// Migrate the schema
 	svsignaldb.Migrate(db)
@@ -86,9 +87,8 @@ func test2(db *gorm.DB) {
 	value_id := 0
 	fval := svsignaldb.FValue{}
 	res := db.Last(&fval)
-	///res := db.Last(&svsignaldb.FValue{}, &value_id)
 	if res.Error != nil {
-		log.Printf("GetLastId", res.Error.Error())
+		log.Println("GetLastId", res.Error.Error())
 	} else {
 		value_id = fval.ID
 	}
@@ -126,7 +126,7 @@ func open_db() *gorm.DB {
 }
 
 const BULK_INSERT_SIZE = 1000
-const CYCLE = 10
+const CYCLE = 1
 const SIGNALS_NOF = 1000
 
 var config = gorm.Config{
@@ -135,16 +135,15 @@ var config = gorm.Config{
 	Logger: new_logger,
 }
 
-var EXECS = []string{
-	"PRAGMA journal_mode = WAL",
-	"PRAGMA synchronous = OFF",
-}
+var EXECS = []string{}
 
 func main() {
 	fmt.Printf("BULK_INSERT_SIZE = %d\nCYCLE = %d\nSIGNALS_NOF = %d\n", BULK_INSERT_SIZE, CYCLE, SIGNALS_NOF)
 	fmt.Printf("%#v\n", EXECS)
 	fmt.Printf("%+v\n", config)
 	//test1(open_db("test_bulk.db"), "test_bulk.db")
-	test2(open_db())
+	//testWrite2(open_db())
+	db := open_db()
+	fmt.Println(gormqbmbase.GetListSignal(db))
 	//test3(open_db("test_transaction.db"), "test_transaction.db")
 }

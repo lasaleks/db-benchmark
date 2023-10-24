@@ -28,7 +28,7 @@ type Signal struct {
 type MValue struct {
 	ID       int
 	SignalID uint  `gorm:"index"`
-	UTime    int64 `gorm:"index"`
+	UTime    int64 `gorm:"index;column:utime;"`
 	Max      float32
 	Min      float32
 	Mean     float32
@@ -38,18 +38,32 @@ type MValue struct {
 
 type IValue struct {
 	ID       int
-	SignalID uint
-	UTime    int64 `gorm:"index"`
-	Value    int32 `gorm:"index"`
+	SignalID uint  `gorm:"index"`
+	UTime    int64 `gorm:"index;column:utime;"`
+	Value    int32
 	OffLine  bool
 }
 
+/*
 type FValue struct {
 	ID       int
 	SignalID uint  `gorm:"index"`
-	UTime    int64 `gorm:"index"`
+	UTime    int64 `gorm:"index;column:utime;"`
 	Value    float64
 	OffLine  bool
+}
+*/
+
+type FValue struct {
+	ID       int
+	SignalID uint  `gorm:"index:idx_sig_utime,priority:2;"`
+	UTime    int64 `gorm:"index:idx_sig_utime,priority:1;column:utime;"`
+	Value    float64
+	OffLine  bool
+}
+
+func (FValue) TableName() string {
+	return "f_values"
 }
 
 type Tag struct {

@@ -1,41 +1,22 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
+	gormbm "github.com/lasaleks/db-benchmark/gorm_bm"
 	svsignaldb "github.com/lasaleks/db-benchmark/svsignal_db"
+	goutils "github.com/lasaleks/go-utils"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
-
-func FillSignals(db *gorm.DB) {
-	gr := &svsignaldb.Group{Model: gorm.Model{ID: 1}, Name: "Группа"}
-	db.Create(&gr)
-	for i := 0; i < SIGNALS_NOF; i++ {
-		db.Create(&svsignaldb.Signal{Model: gorm.Model{ID: uint(i)}, GroupID: gr.ID, Name: fmt.Sprintf("Signal%d", i), Key: fmt.Sprintf("Signal.%d", i), Period: 60})
-	}
-}
-
-var rows_record = 0
-
-func timer(name string) func() {
-	start := time.Now()
-	return func() {
-		duration := time.Since(start)
-		seconds := int64(duration.Milliseconds())
-		var rows_per_sec int64
-		if seconds > 0 {
-			rows_per_sec = int64(rows_record) * 1000 / seconds
-		} else {
-			rows_per_sec = 0
-		}
-		fmt.Printf("%s took %v\nrows = %d\nrows/sec = %d\n", name, time.Since(start), rows_record, rows_per_sec)
-	}
-}
 
 var new_logger = logger.New(
 	log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer
@@ -48,116 +29,8 @@ var new_logger = logger.New(
 	},
 )
 
-func test1(db *gorm.DB, name_db string) {
-	rows_record = 0
-	// Migrate the schema
-	svsignaldb.Migrate(db)
-	FillSignals(db)
-	value_id := 0
-	fval := svsignaldb.FValue{}
-	res := db.Last(&fval)
-	///res := db.Last(&svsignaldb.FValue{}, &value_id)
-	if res.Error != nil {
-		log.Printf("GetLastId", res.Error.Error())
-	} else {
-		value_id = fval.ID
-	}
-	fmt.Println("------test2---- bulk insert + transaction")
-	defer timer(name_db)()
-	pack_size := BULK_INSERT_SIZE
-	values := make([]svsignaldb.FValue, pack_size)
-	for j := 0; j < CYCLE; j++ {
-		for signal_id := 1; signal_id <= SIGNALS_NOF; signal_id++ {
-			for i := 0; i < pack_size; i++ {
-				value_id++
-				rows_record++
-				values[i] = svsignaldb.FValue{ID: value_id, SignalID: uint(signal_id), UTime: int64(signal_id), Value: float64(signal_id)}
-			}
-			db.Create(values)
-		}
-	}
-}
-
-func test2(db *gorm.DB, name_db string) {
-	rows_record = 0
-	// Migrate the schema
-	svsignaldb.Migrate(db)
-	FillSignals(db)
-	value_id := 0
-	fval := svsignaldb.FValue{}
-	res := db.Last(&fval)
-	///res := db.Last(&svsignaldb.FValue{}, &value_id)
-	if res.Error != nil {
-		log.Printf("GetLastId", res.Error.Error())
-	} else {
-		value_id = fval.ID
-	}
-	fmt.Println("------test2---- bulk insert + transaction")
-	defer timer(name_db)()
-	pack_size := BULK_INSERT_SIZE
-	values := make([]svsignaldb.FValue, pack_size)
-	for j := 0; j < CYCLE; j++ {
-		for signal_id := 1; signal_id <= SIGNALS_NOF; signal_id++ {
-			tx := db.Begin()
-			for i := 0; i < pack_size; i++ {
-				value_id++
-				rows_record++
-				values[i] = svsignaldb.FValue{ID: value_id, SignalID: uint(signal_id), UTime: int64(signal_id), Value: float64(signal_id)}
-			}
-			tx.Create(values)
-			tx.Commit()
-		}
-	}
-}
-
-func open_db(name_db string) *gorm.DB {
-	db, err := gorm.Open(sqlite.Open(name_db), &config)
-	if err != nil {
-		panic("failed to connect database")
-	}
-	for _, exec := range EXECS {
-		db.Exec(exec)
-	}
-	return db
-}
-
-func test3(db *gorm.DB, name_db string) {
-	rows_record = 0
-	// Migrate the schema
-	svsignaldb.Migrate(db)
-	FillSignals(db)
-	value_id := 0
-	fval := svsignaldb.FValue{}
-	res := db.Last(&fval)
-	///res := db.Last(&svsignaldb.FValue{}, &value_id)
-	if res.Error != nil {
-		log.Printf("GetLastId", res.Error.Error())
-	} else {
-		value_id = fval.ID
-	}
-	fmt.Println("------" + name_db + "---- transaction")
-	defer timer(name_db)()
-	pack_size := BULK_INSERT_SIZE
-	for j := 0; j < CYCLE; j++ {
-		for signal_id := 1; signal_id <= SIGNALS_NOF; signal_id++ {
-			tx := db.Begin()
-			for i := 0; i < pack_size; i++ {
-				value_id++
-				rows_record++
-				tx.Create(&svsignaldb.FValue{ID: value_id, SignalID: uint(signal_id), UTime: int64(signal_id), Value: float64(signal_id)})
-			}
-
-			tx.Commit()
-		}
-	}
-}
-
-const BULK_INSERT_SIZE = 1000
-const CYCLE = 10
-const SIGNALS_NOF = 1000
-
 var config = gorm.Config{
-	//PrepareStmt: true,
+	//PrepareStmt:            true,
 	//SkipDefaultTransaction: true,
 	Logger: new_logger,
 }
@@ -167,11 +40,81 @@ var EXECS = []string{
 	"PRAGMA synchronous = OFF",
 }
 
+var migrate = flag.Bool("migrate", false, "")
+var signal_nof = flag.Int("signal-nof", 10, "")
+var signal_write_nof_rows = flag.Int("signal-write-nof-rows", 1, "")
+var bulkSize = flag.Int("bulk-size", 1000, "")
+var read_begin = flag.Int64("read-begin", 0, "")
+var read_end = flag.Int64("read-end", 0, "")
+var read_limit = flag.Int("limit", 0, "")
+var read = flag.Bool("read", false, "")
+var write = flag.Bool("write", false, "")
+var printProcess = flag.Bool("print-process", false, "")
+var typeDB = flag.String("type-db", "sqlite", "sqlite/mysql")
+var urlDB = flag.String("url", "../database/svsignal_bm.db/", "--url apache2:apache2data@tcp(localhost:3306)/benchmark?charset=utf8&parseTime=True&loc=Local")
+
 func main() {
-	fmt.Printf("BULK_INSERT_SIZE = %d\nCYCLE = %d\nSIGNALS_NOF = %d\n", BULK_INSERT_SIZE, CYCLE, SIGNALS_NOF)
-	fmt.Printf("%#v\n", EXECS)
-	fmt.Printf("%+v\n", config)
-	//test1(open_db("test_bulk.db"), "test_bulk.db")
-	test2(open_db("test_bulk_transaction.db"), "test_bulk_transaction.db")
+	var wg sync.WaitGroup
+	ctx := context.Background()
+	flag.Parse()
+	var db *gorm.DB
+	var err error
+	fmt.Printf("BULK_INSERT_SIZE = %d\nSIGNALS_NOF = %d\n", *bulkSize, *signal_nof)
+	switch *typeDB {
+	case "sqlite":
+		db, err = gorm.Open(sqlite.Open(*urlDB), &config)
+		if err != nil {
+			panic("failed to connect database")
+		}
+		for _, exec := range EXECS {
+			fmt.Println(exec)
+			db.Exec(exec)
+		}
+	case "mysql":
+		db, err = gorm.Open(mysql.Open(*urlDB), &config)
+		if err != nil {
+			log.Panicln("failed to connect database", *urlDB)
+		}
+	default:
+		log.Panicln("typeDB error value:", *typeDB)
+	}
+
+	if *migrate {
+		fmt.Println("Migrate data base")
+		svsignaldb.Migrate(db)
+	}
+	gormbm.InitBenchMark(db, *signal_nof)
+	signals := gormbm.GetListSignal(db)
+	if *write {
+		wg.Add(1)
+		go gormbm.BenchmarkWrite(&wg, db,
+			gormbm.OptionBMWrite{
+				BulkSize:           *bulkSize,
+				ListSignal:         signals,
+				PrintProcess:       *printProcess,
+				SignalWriteNOfRows: *signal_write_nof_rows,
+			})
+	}
+	if *read {
+		wg.Add(1)
+		go gormbm.BenchmarkRead(&wg, db, gormbm.OptionBMRead{
+			Begin:        *read_begin,
+			End:          *read_end,
+			Limit:        *read_limit,
+			ListSignal:   signals,
+			PrintProcess: *printProcess,
+		})
+		//*read_begin, *read_end, *read_limit, signals)
+	}
+
+	f_shutdown := func(ctx context.Context) {
+		fmt.Println("ShutDown")
+		gormbm.Stop()
+
+	}
+	wg.Add(1)
+	go goutils.WaitSignalExit(&wg, ctx, f_shutdown)
+
+	wg.Wait()
 	//test3(open_db("test_transaction.db"), "test_transaction.db")
 }
