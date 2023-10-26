@@ -41,17 +41,16 @@ var EXECS = []string{
 }
 
 var migrate = flag.Bool("migrate", false, "")
-var signal_nof = flag.Int("signal-nof", 10, "")
-var signal_write_nof_rows = flag.Int("signal-write-nof-rows", 1, "")
+var signal_nof = flag.Int("signal-nof", 1000, "")
+var signal_write_nof_rows = flag.Int("signal-write-nof-rows", 10, "")
 var bulkSize = flag.Int("bulk-size", 1000, "")
-var read_begin = flag.Int64("read-begin", 0, "")
-var read_end = flag.Int64("read-end", 0, "")
-var read_limit = flag.Int("limit", 0, "")
+var read_limit = flag.Int("limit", 1000, "")
 var read = flag.Bool("read", false, "")
 var write = flag.Bool("write", false, "")
 var printProcess = flag.Bool("print-process", false, "")
 var typeDB = flag.String("type-db", "sqlite", "sqlite/mysql")
-var urlDB = flag.String("url", "../database/svsignal_bm.db/", "--url apache2:apache2data@tcp(localhost:3306)/benchmark?charset=utf8&parseTime=True&loc=Local")
+var pathDB = flag.String("url", "svsignal_bm.db", "")
+var hostDB = flag.String("host", "localhost", "")
 
 func main() {
 	var wg sync.WaitGroup
@@ -62,7 +61,7 @@ func main() {
 	fmt.Printf("BULK_INSERT_SIZE = %d\nSIGNALS_NOF = %d\n", *bulkSize, *signal_nof)
 	switch *typeDB {
 	case "sqlite":
-		db, err = gorm.Open(sqlite.Open(*urlDB), &config)
+		db, err = gorm.Open(sqlite.Open(*pathDB), &config)
 		if err != nil {
 			panic("failed to connect database")
 		}
@@ -71,9 +70,10 @@ func main() {
 			db.Exec(exec)
 		}
 	case "mysql":
-		db, err = gorm.Open(mysql.Open(*urlDB), &config)
+		url := fmt.Sprintf("bm:bm@tcp(%s:3306)/benchmark?charset=utf8&parseTime=True&loc=Local", *hostDB)
+		db, err = gorm.Open(mysql.Open(url), &config)
 		if err != nil {
-			log.Panicln("failed to connect database", *urlDB)
+			log.Panicln("failed to connect database", url)
 		}
 	default:
 		log.Panicln("typeDB error value:", *typeDB)
@@ -85,6 +85,7 @@ func main() {
 	}
 	gormbm.InitBenchMark(db, *signal_nof)
 	signals := gormbm.GetListSignal(db)
+	signals = signals[0:*signal_nof]
 	if *write {
 		wg.Add(1)
 		go gormbm.BenchmarkWrite(&wg, db,
@@ -98,8 +99,6 @@ func main() {
 	if *read {
 		wg.Add(1)
 		go gormbm.BenchmarkRead(&wg, db, gormbm.OptionBMRead{
-			Begin:        *read_begin,
-			End:          *read_end,
 			Limit:        *read_limit,
 			ListSignal:   signals,
 			PrintProcess: *printProcess,

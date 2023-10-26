@@ -44,7 +44,6 @@ type IValue struct {
 	OffLine  bool
 }
 
-/*
 type FValue struct {
 	ID       int
 	SignalID uint  `gorm:"index"`
@@ -52,15 +51,14 @@ type FValue struct {
 	Value    float64
 	OffLine  bool
 }
-*/
 
-type FValue struct {
+/*type FValue struct {
 	ID       int
 	SignalID uint  `gorm:"index:idx_sig_utime,priority:2;"`
 	UTime    int64 `gorm:"index:idx_sig_utime,priority:1;column:utime;"`
 	Value    float64
 	OffLine  bool
-}
+}*/
 
 func (FValue) TableName() string {
 	return "f_values"

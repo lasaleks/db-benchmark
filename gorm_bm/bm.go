@@ -12,17 +12,12 @@ import (
 	"gorm.io/gorm"
 )
 
-func CreateSignal(db *gorm.DB, nof int) {
-	gr := &svsignaldb.Group{Model: gorm.Model{ID: 1}, Name: "Группа"}
-	db.Create(&gr)
-	for i := 0; i < nof; i++ {
-		db.Create(&svsignaldb.Signal{Model: gorm.Model{ID: uint(i)}, GroupID: gr.ID, Name: fmt.Sprintf("Signal%d", i), Key: fmt.Sprintf("Signal.%d", i), Period: 60})
-	}
-}
-
 func InitBenchMark(db *gorm.DB, nofsignals int) {
 	gr := &svsignaldb.Group{Model: gorm.Model{ID: 1}, Name: "Группа"}
-	db.Create(&gr)
+	res := db.Create(&gr)
+	if res.Error != nil {
+		log.Println(res.Error)
+	}
 	for i := 1; i <= nofsignals; i++ {
 		db.Create(&svsignaldb.Signal{Model: gorm.Model{ID: uint(i)}, GroupID: gr.ID, Name: fmt.Sprintf("Signal%d", i), Key: fmt.Sprintf("Signal.%d", i), Period: 60})
 	}
@@ -65,6 +60,7 @@ func BenchmarkWrite(wg *sync.WaitGroup, db *gorm.DB, option OptionBMWrite) {
 	var utime_value int64 = max_utime + 1
 	idx_value := 0
 	tx := db.Begin()
+	start_cmt := start
 	for atomic.LoadInt32(&stop_bm) == 0 {
 		for _, signal := range option.ListSignal {
 			if atomic.LoadInt32(&stop_bm) != 0 {
@@ -73,7 +69,7 @@ func BenchmarkWrite(wg *sync.WaitGroup, db *gorm.DB, option OptionBMWrite) {
 			for i := 0; i < option.SignalWriteNOfRows; i++ {
 				value_id++
 				insert_rows++
-				values[idx_value] = svsignaldb.FValue{ID: value_id, SignalID: signal.ID, UTime: utime_value, Value: 0}
+				values[idx_value] = svsignaldb.FValue{ID: value_id, SignalID: signal.ID, UTime: utime_value + int64(i), Value: 0}
 				idx_value++
 				if idx_value >= option.BulkSize {
 					idx_value = 0
@@ -87,9 +83,8 @@ func BenchmarkWrite(wg *sync.WaitGroup, db *gorm.DB, option OptionBMWrite) {
 					}
 					tx = db.Begin()
 					if option.PrintProcess {
-						if insert_rows%(option.BulkSize*100) == 0 {
-							fmt.Println("write", insert_rows)
-						}
+						fmt.Printf("write rows:%d took:%v\n", insert_rows, time.Since(start_cmt))
+						start_cmt = time.Now()
 					}
 				}
 			}
@@ -116,41 +111,69 @@ func BenchmarkWrite(wg *sync.WaitGroup, db *gorm.DB, option OptionBMWrite) {
 }
 
 type OptionBMRead struct {
-	Begin        int64
-	End          int64
 	Limit        int
 	ListSignal   []*svsignaldb.Signal
 	PrintProcess bool
 }
 
+type QuerySignal struct {
+	prevId int
+	begin  int64
+	end    int64
+}
+
 func BenchmarkRead(wg *sync.WaitGroup, db *gorm.DB, option OptionBMRead) {
 	defer wg.Done()
+
+	var count int64
+	db.Table(svsignaldb.FValue{}.TableName()).Count(&count)
+	fmt.Println("count values:", count)
+
+	query_signals := map[uint]*QuerySignal{}
+
 	start := time.Now()
 	read_values := 0
 	values := []svsignaldb.FValue{}
-	begin_period := option.Begin
-	end_period := begin_period + int64(option.Limit)
+	start_cmt := start
 	for atomic.LoadInt32(&stop_bm) == 0 {
 		for _, signal := range option.ListSignal {
 			if atomic.LoadInt32(&stop_bm) != 0 {
 				break
 			}
-			res := db.Where("signal_id = ? and utime>=? and utime<=?", signal.ID, begin_period, end_period).Limit(option.Limit - 1).Find(&values)
+			query, ok := query_signals[signal.ID]
+			if !ok {
+				query = &QuerySignal{
+					begin: 0,
+					end:   int64(option.Limit),
+				}
+				query_signals[signal.ID] = query
+			}
+			if option.PrintProcess {
+				fmt.Printf("signal_id:%d begin:%d end:%d", signal.ID, query.begin, query.end)
+			}
+			res := db.Where("signal_id = ? and utime>=? and utime<?", signal.ID, query.begin, query.end).Limit(option.Limit).Find(&values)
 			if res.Error != nil {
 				log.Println(res.Error)
 			}
-			//fmt.Println(signal.ID, begin_period, end_period, len(values))
-			//db.Where("utime>=? and utime<=?", begin_utime, begin_utime+10000).Find(&values)
+
+			if len(values) > 0 {
+				val := &values[len(values)-1]
+				if val.ID == query.prevId {
+					query.begin = val.UTime + 1
+				} else {
+					query.begin = val.UTime
+				}
+				query.end = val.UTime + int64(option.Limit)
+				query.prevId = val.ID
+			} else {
+				query.begin = 0
+				query.end = int64(option.Limit)
+			}
 			read_values += len(values)
-		}
-		if begin_period+int64(option.Limit) < option.End {
-			begin_period += int64(option.Limit)
-		} else {
-			begin_period = int64(option.Limit)
-		}
-		end_period = begin_period + int64(option.Limit)
-		if option.PrintProcess {
-			fmt.Printf("begin:%d end:%d read %d\n", begin_period, end_period, read_values)
+			if option.PrintProcess {
+				fmt.Printf(" +(%d) read %d took:%v\n", len(values), read_values, time.Since(start_cmt))
+				start_cmt = time.Now()
+			}
 		}
 	}
 	duration := time.Since(start)
